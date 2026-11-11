@@ -2,6 +2,7 @@ package com.garmentqc.system.enums;
 
 public enum AttendanceStatus {
     PRESENT,
-    INCOMPLETE
-
+    INCOMPLETE,
+    ABSENT,
+    PERMISSION
 }

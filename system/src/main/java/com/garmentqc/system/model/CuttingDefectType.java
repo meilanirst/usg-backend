@@ -16,7 +16,6 @@ import lombok.Setter;
 @Table(name = "cutting_defect_types", uniqueConstraints = {
         @UniqueConstraint(name = "uk_cutting_process_defect", columnNames = { "process_check", "name" })
 })
-
 @Getter
 @Setter
 @NoArgsConstructor

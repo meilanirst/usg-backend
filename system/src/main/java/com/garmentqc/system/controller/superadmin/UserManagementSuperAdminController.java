@@ -2,6 +2,9 @@ package com.garmentqc.system.controller.superadmin;
 
 import java.util.List;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -85,5 +88,21 @@ public class UserManagementSuperAdminController {
     public ResponseEntity<CreateUserResponse> getCurrentUserProfile(Authentication authentication) {
         validateSuperAdmin(authentication);
         return ResponseEntity.ok(userService.getCurrentUserProfile());
+    }
+
+    @GetMapping("/paginated")
+    public ResponseEntity<Page<CreateUserResponse>> getAllUsersPaginated(
+            Authentication authentication,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        validateSuperAdmin(authentication);
+
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), 100));
+
+        return ResponseEntity.ok(
+                userService.getAllUsersPaginated(pageable));
     }
 }

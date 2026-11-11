@@ -109,6 +109,54 @@ public class InspectionReportService {
                 return generateGroupedReport("MONTHLY", startDate, endDate, authorizedSection, false, currentUser);
         }
 
+        public InspectionGroupedReportResponse getBuyerReport(
+                        LocalDate startDate,
+                        LocalDate endDate,
+                        String section,
+                        User currentUser) {
+                validateDate(startDate);
+                validateDate(endDate);
+
+                if (startDate.isAfter(endDate)) {
+                        throw new BadRequestException(
+                                        "Start date tidak boleh setelah end date");
+                }
+
+                String authorizedSection = resolveSectionForUser(currentUser, section);
+
+                return generateGroupedReport(
+                                "CUSTOM",
+                                startDate,
+                                endDate,
+                                authorizedSection,
+                                true,
+                                currentUser);
+        }
+
+        public InspectionGroupedReportResponse getBuyerStyleReport(
+                        LocalDate startDate,
+                        LocalDate endDate,
+                        String section,
+                        User currentUser) {
+                validateDate(startDate);
+                validateDate(endDate);
+
+                if (startDate.isAfter(endDate)) {
+                        throw new BadRequestException(
+                                        "Start date tidak boleh setelah end date");
+                }
+
+                String authorizedSection = resolveSectionForUser(currentUser, section);
+
+                return generateGroupedReport(
+                                "CUSTOM",
+                                startDate,
+                                endDate,
+                                authorizedSection,
+                                false,
+                                currentUser);
+        }
+
         public String resolveSectionForUser(User currentUser, String requestedSection) {
                 if (currentUser == null || currentUser.getRole() == null) {
                         throw new AccessDeniedException("User tidak memiliki akses");
@@ -555,8 +603,7 @@ public class InspectionReportService {
         private List<InspectionReportResponse.WashingTypeSummary> buildWashingTypeSummaries(
                         List<Inspection> inspections) {
                 Map<String, List<Inspection>> grouped = inspections.stream()
-                                .filter(i -> i.getLine() != null
-                                                && i.getLine().getSection() != null
+                                .filter(i -> i.getLine() != null && i.getLine().getSection() != null
                                                 && "WASHING".equals(i.getLine().getSection().name()))
                                 .filter(i -> i.getWashingType() != null)
                                 .collect(Collectors.groupingBy(

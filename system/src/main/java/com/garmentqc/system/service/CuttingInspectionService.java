@@ -1,12 +1,16 @@
 
 package com.garmentqc.system.service;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,11 +20,13 @@ import com.garmentqc.system.enums.CuttingProcessCheck;
 import com.garmentqc.system.exception.BadRequestException;
 import com.garmentqc.system.exception.ResourceNotFoundException;
 import com.garmentqc.system.exception.UnauthorizedException;
+import com.garmentqc.system.model.Attendance;
 import com.garmentqc.system.model.CuttingDefectType;
 import com.garmentqc.system.model.CuttingInspection;
 import com.garmentqc.system.model.CuttingInspectionItem;
 import com.garmentqc.system.model.Line;
 import com.garmentqc.system.model.User;
+import com.garmentqc.system.repository.AttendanceRepository;
 import com.garmentqc.system.repository.CuttingDefectTypeRepository;
 import com.garmentqc.system.repository.CuttingInspectionItemRepository;
 import com.garmentqc.system.repository.CuttingInspectionRepository;
@@ -32,14 +38,18 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CuttingInspectionService {
 
+        private static final ZoneId ZONE = ZoneId.of("Asia/Jakarta");
+
         private final CuttingInspectionRepository inspectionRepository;
         private final CuttingInspectionItemRepository itemRepository;
         private final CuttingDefectTypeRepository defectTypeRepository;
         private final LineRepository lineRepository;
+        private final AttendanceRepository attendanceRepository;
 
         @Transactional
         public CuttingInspectionResponse create(CuttingInspectionRequest request, User submittedBy) {
                 validateCanCreate(submittedBy);
+                validateAttendance(submittedBy);
                 validateItems(request);
 
                 Line line = getActiveCuttingLine(request.getLineId());
@@ -73,6 +83,27 @@ public class CuttingInspectionService {
                                 .stream()
                                 .map(this::toResponse)
                                 .toList();
+        }
+
+        @Transactional(readOnly = true)
+        public Page<CuttingInspectionResponse> getAllPaginated(
+                        User currentUser,
+                        Pageable pageable) {
+
+                validateCuttingSection(currentUser);
+
+                Page<CuttingInspection> inspections;
+
+                if ("USER".equals(currentUser.getRole().name())) {
+                        inspections = inspectionRepository
+                                        .findBySubmittedByIdOrderByCreatedAtDescIdDesc(
+                                                        currentUser.getId(), pageable);
+                } else {
+                        inspections = inspectionRepository
+                                        .findAllByOrderByCreatedAtDescIdDesc(pageable);
+                }
+
+                return inspections.map(this::toResponse);
         }
 
         @Transactional(readOnly = true)
@@ -303,6 +334,28 @@ public class CuttingInspectionService {
                 List<CuttingInspectionItem> items = itemRepository.findByCuttingInspection(inspection);
 
                 itemRepository.deleteAll(items);
+        }
+
+        private void validateAttendance(User user) {
+
+                LocalDate today = LocalDate.now(ZONE);
+
+                Attendance attendance = attendanceRepository
+                                .findByUser_IdAndAttendanceDate(
+                                                user.getId(),
+                                                today)
+                                .orElseThrow(() -> new BadRequestException(
+                                                "Anda harus melakukan check-in sebelum membuat inspeksi"));
+
+                if (attendance.getCheckInAt() == null) {
+                        throw new BadRequestException(
+                                        "Anda harus melakukan check-in sebelum membuat inspeksi");
+                }
+
+                if (attendance.getCheckOutAt() != null) {
+                        throw new BadRequestException(
+                                        "Anda sudah melakukan check-out. Tidak dapat membuat inspeksi baru");
+                }
         }
 
         private CuttingInspectionResponse toResponse(CuttingInspection inspection) {

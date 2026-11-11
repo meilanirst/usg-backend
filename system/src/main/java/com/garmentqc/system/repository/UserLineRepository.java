@@ -20,4 +20,6 @@ public interface UserLineRepository extends JpaRepository<UserLine, String> {
 
     boolean existsByLine(Line line);
 
+    boolean existsByUser_IdAndLine_Id(String userId, String lineId);
+
 }

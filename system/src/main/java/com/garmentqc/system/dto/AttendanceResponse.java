@@ -3,6 +3,7 @@ package com.garmentqc.system.dto;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 import com.garmentqc.system.enums.AttendanceStatus;
 
@@ -14,6 +15,12 @@ import lombok.Getter;
 public class AttendanceResponse {
 
     private String id;
+
+    private String userId;
+
+    private String username;
+
+    private String section;
 
     private LocalDate attendanceDate;
 
@@ -44,4 +51,6 @@ public class AttendanceResponse {
     private Integer effectiveMinutes;
 
     private AttendanceStatus status;
+
+    private List<LineResponse> lines;
 }

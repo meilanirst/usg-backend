@@ -64,7 +64,8 @@ public class LineService {
         Line line = findLine(id);
 
         if (userLineRepository.existsByLine(line)) {
-            throw new BadRequestException("Line masih digunakan oleh user QC. " + "Nonaktifkan line jika sudah tidak digunakan.");
+            throw new BadRequestException(
+                    "Line masih digunakan oleh user QC. " + "Nonaktifkan line jika sudah tidak digunakan.");
         }
 
         lineRepository.delete(line);
@@ -143,11 +144,9 @@ public class LineService {
     private void validateDuplicate(String name, Section section, String currentId) {
         boolean exists;
         if (currentId == null) {
-            exists = lineRepository.existsByNameAndSection(
-                    name, section);
+            exists = lineRepository.existsByNameAndSection(name, section);
         } else {
-            exists = lineRepository.existsByNameAndSectionAndIdNot(
-                    name, section, currentId);
+            exists = lineRepository.existsByNameAndSectionAndIdNot(name, section, currentId);
         }
 
         if (exists) {

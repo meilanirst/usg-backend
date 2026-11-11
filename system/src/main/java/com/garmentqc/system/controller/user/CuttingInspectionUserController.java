@@ -4,6 +4,9 @@ package com.garmentqc.system.controller.user;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -66,7 +69,7 @@ public class CuttingInspectionUserController {
 
         @PatchMapping("/{id}/comment")
         public ResponseEntity<CuttingInspectionResponse> patchComment(@PathVariable String id,
-                       @Valid @RequestBody Map<String, String> request, @AuthenticationPrincipal User currentUser) {
+                        @Valid @RequestBody Map<String, String> request, @AuthenticationPrincipal User currentUser) {
                 return ResponseEntity
                                 .ok(cuttingInspectionService.patchComment(id, request.get("comment"), currentUser));
         }
@@ -81,5 +84,20 @@ public class CuttingInspectionUserController {
         public ResponseEntity<List<CuttingDefectType>> searchDefectTypes(@RequestParam CuttingProcessCheck processCheck,
                         @RequestParam(required = false) String search, @AuthenticationPrincipal User currentUser) {
                 return ResponseEntity.ok(cuttingInspectionService.searchDefectTypes(processCheck, search, currentUser));
+        }
+
+        @GetMapping("/paginated")
+        public ResponseEntity<Page<CuttingInspectionResponse>> getAllPaginated(
+                        @AuthenticationPrincipal User currentUser,
+                        @RequestParam(defaultValue = "0") int page,
+                        @RequestParam(defaultValue = "10") int size) {
+
+                Pageable pageable = PageRequest.of(
+                                Math.max(page, 0),
+                                Math.min(Math.max(size, 1), 100));
+
+                return ResponseEntity.ok(
+                                cuttingInspectionService.getAllPaginated(
+                                                currentUser, pageable));
         }
 }

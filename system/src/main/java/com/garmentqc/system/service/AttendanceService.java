@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -19,8 +20,13 @@ import com.garmentqc.system.exception.BadRequestException;
 import com.garmentqc.system.exception.ResourceNotFoundException;
 import com.garmentqc.system.exception.UnauthorizedException;
 import com.garmentqc.system.model.Attendance;
+import com.garmentqc.system.model.Line;
+import com.garmentqc.system.model.OperatorLineAssignment;
 import com.garmentqc.system.model.User;
+import com.garmentqc.system.model.UserLine;
 import com.garmentqc.system.repository.AttendanceRepository;
+import com.garmentqc.system.repository.OperatorLineAssignmentRepository;
+import com.garmentqc.system.repository.UserLineRepository;
 import com.garmentqc.system.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -33,6 +39,8 @@ public class AttendanceService {
 
         private final AttendanceRepository attendanceRepository;
         private final UserRepository userRepository;
+        private final OperatorLineAssignmentRepository assignmentRepository;
+        private final UserLineRepository userLineRepository;
 
         @Value("${app.attendance.latitude}")
         private double officeLatitude;
@@ -66,7 +74,10 @@ public class AttendanceService {
         }
 
         private void validateLocation(double latitude, double longitude, double accuracy) {
-                if (!Double.isFinite(latitude) || !Double.isFinite(longitude) || !Double.isFinite(accuracy)) {
+
+                if (!Double.isFinite(latitude)
+                                || !Double.isFinite(longitude)
+                                || !Double.isFinite(accuracy)) {
                         throw new BadRequestException("Koordinat GPS tidak valid");
                 }
 
@@ -79,7 +90,8 @@ public class AttendanceService {
                 }
 
                 if (accuracy <= 0 || accuracy > maxGpsAccuracy) {
-                        throw new BadRequestException("Akurasi GPS tidak memenuhi persyaratan");
+                        throw new BadRequestException(
+                                        "Akurasi GPS tidak memenuhi persyaratan");
                 }
 
                 double distance = calculateDistance(
@@ -89,11 +101,18 @@ public class AttendanceService {
                                 officeLongitude);
 
                 if (distance > radiusMeter) {
-                        throw new BadRequestException("Lokasi di luar radius absensi " + (int) radiusMeter + " meter");
+                        throw new BadRequestException(
+                                        "Lokasi di luar radius absensi "
+                                                        + (int) radiusMeter + " meter");
                 }
         }
 
-        private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+        private double calculateDistance(
+                        double lat1,
+                        double lon1,
+                        double lat2,
+                        double lon2) {
+
                 final double EARTH_RADIUS = 6371000;
 
                 double dLat = Math.toRadians(lat2 - lat1);
@@ -115,28 +134,26 @@ public class AttendanceService {
                 return AttendanceResponse.builder()
                                 .id(attendance.getId())
                                 .attendanceDate(attendance.getAttendanceDate())
-
                                 .checkInAt(attendance.getCheckInAt())
                                 .checkOutAt(attendance.getCheckOutAt())
-
                                 .checkInLatitude(attendance.getCheckInLatitude())
                                 .checkInLongitude(attendance.getCheckInLongitude())
                                 .checkInAccuracy(attendance.getCheckInAccuracy())
-
                                 .checkOutLatitude(attendance.getCheckOutLatitude())
                                 .checkOutLongitude(attendance.getCheckOutLongitude())
                                 .checkOutAccuracy(attendance.getCheckOutAccuracy())
-
                                 .workingMinutes(attendance.getWorkingMinutes())
                                 .breakMinutes(attendance.getBreakMinutes())
                                 .effectiveMinutes(attendance.getEffectiveMinutes())
-
                                 .status(attendance.getStatus())
                                 .build();
         }
 
         @Transactional
-        public AttendanceResponse checkIn(String username, CheckInRequest request) {
+        public AttendanceResponse checkIn(
+                        String username,
+                        CheckInRequest request) {
+
                 User user = validateAttendanceUser(username);
 
                 LocalDate today = LocalDate.now(ZONE);
@@ -148,8 +165,24 @@ public class AttendanceService {
 
                 if (attendanceRepository.existsByUser_IdAndAttendanceDate(
                                 user.getId(), today)) {
-
                         throw new BadRequestException("Anda sudah melakukan absensi hari ini");
+                }
+
+                List<UserLine> userLines = userLineRepository.findByUser(user);
+
+                if (userLines.size() != 1) {
+                        throw new BadRequestException(
+                                        "QC harus memiliki tepat satu line aktif sebelum melakukan check-in");
+                }
+
+                Line assignedLine = userLines.get(0).getLine();
+
+                if (!assignedLine.isActive()) {
+                        throw new BadRequestException("Line QC sudah tidak aktif");
+                }
+
+                if (assignedLine.getSection() != user.getSection()) {
+                        throw new BadRequestException("Section line tidak sesuai dengan section QC");
                 }
 
                 Instant now = Instant.now();
@@ -168,6 +201,15 @@ public class AttendanceService {
 
                 Attendance saved = attendanceRepository.save(attendance);
 
+                OperatorLineAssignment assignment = new OperatorLineAssignment();
+
+                assignment.setAttendance(saved);
+                assignment.setUser(user);
+                assignment.setLine(assignedLine);
+                assignment.setStartAt(now);
+
+                assignmentRepository.save(assignment);
+
                 return toResponse(saved);
         }
 
@@ -178,9 +220,7 @@ public class AttendanceService {
                 LocalDate today = LocalDate.now(ZONE);
 
                 Attendance attendance = attendanceRepository
-                                .findByUser_IdAndAttendanceDate(
-                                                user.getId(),
-                                                today)
+                                .findByUser_IdAndAttendanceDate(user.getId(), today)
                                 .orElseThrow(() -> new ResourceNotFoundException(
                                                 "Anda belum melakukan check-in hari ini."));
 
@@ -206,18 +246,27 @@ public class AttendanceService {
 
                 int breakMinutes;
 
-                if (workingMinutes <= 570) {
+                if (workingMinutes < 570) {
                         breakMinutes = 0;
-                } else if (workingMinutes <= 600) {
+                } else if (workingMinutes < 600) {
                         breakMinutes = 30;
                 } else {
                         breakMinutes = 60;
                 }
 
-                int effectiveMinutes = Math.toIntExact(
-                                workingMinutes - breakMinutes);
-
+                int effectiveMinutes = Math.toIntExact(workingMinutes - breakMinutes);
                 attendance.setCheckOutAt(now);
+
+                assignmentRepository
+                                .findByAttendance_IdAndEndAtIsNull(attendance.getId())
+                                .ifPresent(assignment -> {
+                                        if (!now.isAfter(assignment.getStartAt())) {
+                                                throw new BadRequestException("Waktu check-out assignment tidak valid");
+                                        }
+
+                                        assignment.setEndAt(now);
+                                        assignmentRepository.save(assignment);
+                                });
 
                 attendance.setCheckOutLatitude(request.getLatitude());
                 attendance.setCheckOutLongitude(request.getLongitude());
@@ -240,9 +289,7 @@ public class AttendanceService {
                 LocalDate today = LocalDate.now(ZONE);
 
                 Attendance attendance = attendanceRepository
-                                .findByUser_IdAndAttendanceDate(
-                                                user.getId(),
-                                                today)
+                                .findByUser_IdAndAttendanceDate(user.getId(), today)
                                 .orElseThrow(() -> new ResourceNotFoundException(
                                                 "Data absensi hari ini belum tersedia."));
 

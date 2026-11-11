@@ -1,8 +1,11 @@
 package com.garmentqc.system.repository;
 
+import java.time.Instant;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.garmentqc.system.model.CuttingInspection;
 import com.garmentqc.system.model.CuttingInspectionItem;
@@ -11,4 +14,27 @@ public interface CuttingInspectionItemRepository extends JpaRepository<CuttingIn
 
     List<CuttingInspectionItem> findByCuttingInspection(CuttingInspection cuttingInspection);
 
+    @Query("""
+            SELECT item
+            FROM CuttingInspectionItem item
+            JOIN FETCH item.cuttingInspection inspection
+            WHERE inspection.createdAt >= :start
+              AND inspection.createdAt < :end
+            """)
+    List<CuttingInspectionItem> findItemsByInspectionDateRange(
+            @Param("start") Instant start,
+            @Param("end") Instant end);
+
+    @Query("""
+            SELECT item
+            FROM CuttingInspectionItem item
+            JOIN FETCH item.cuttingInspection inspection
+            WHERE inspection.createdAt >= :start
+              AND inspection.createdAt < :end
+              AND inspection.submittedBy.id = :userId
+            """)
+    List<CuttingInspectionItem> findItemsByInspectionDateRangeAndUserId(
+            @Param("start") Instant start,
+            @Param("end") Instant end,
+            @Param("userId") String userId);
 }

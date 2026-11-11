@@ -3,6 +3,10 @@ package com.garmentqc.system.controller.admin;
 
 import java.util.List;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -74,6 +78,20 @@ public class InspectionAdminController {
                         .stream()
                         .map(a -> new DefectSearchResponse.Area(a.getId(), a.getName()))
                         .toList());
+    }
+
+    @GetMapping("/paginated")
+    public ResponseEntity<Page<InspectionResponse>> getAllPaginated(
+            @RequestParam(required = false) String section,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), 100));
+
+        return ResponseEntity.ok(
+                inspectionService.getAllPaginated(section, pageable));
     }
 
 }

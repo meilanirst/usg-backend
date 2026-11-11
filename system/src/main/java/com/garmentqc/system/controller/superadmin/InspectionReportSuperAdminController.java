@@ -90,4 +90,22 @@ public class InspectionReportSuperAdminController {
                 return ResponseEntity.ok(
                                 reportService.getMonthlyStyleReport(year, month, section, currentUser));
         }
+
+        @GetMapping("/buyers/date")
+        public ResponseEntity<InspectionGroupedReportResponse> getBuyerReport(
+                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+                        @AuthenticationPrincipal User currentUser) {
+                return ResponseEntity.ok(
+                                reportService.getBuyerReport(startDate, endDate, null, currentUser));
+        }
+
+        @GetMapping("/styles/date")
+        public ResponseEntity<InspectionGroupedReportResponse> getBuyerStyleReport(
+                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+                        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+                        @AuthenticationPrincipal User currentUser) {
+                return ResponseEntity.ok(
+                                reportService.getBuyerStyleReport(startDate, endDate, null, currentUser));
+        }
 }

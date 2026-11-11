@@ -1,6 +1,7 @@
 package com.garmentqc.system.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -14,5 +15,8 @@ public interface LineRepository extends JpaRepository<Line, String> {
 
     boolean existsByNameAndSectionAndIdNot(String name, Section section, String id);
 
+    List<Line> findBySectionAndActiveTrue(Section section);
+
+    Optional<Line> findByIdAndSectionAndActiveTrue(String id, Section section);
+
 }
-    

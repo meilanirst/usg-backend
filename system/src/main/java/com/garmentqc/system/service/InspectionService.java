@@ -1,10 +1,24 @@
+
 package com.garmentqc.system.service;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -16,16 +30,19 @@ import com.garmentqc.system.dto.DefectSearchResponse;
 import com.garmentqc.system.dto.InspectionDefectRequest;
 import com.garmentqc.system.dto.InspectionRequest;
 import com.garmentqc.system.dto.InspectionResponse;
+import com.garmentqc.system.enums.Section;
 import com.garmentqc.system.enums.WashingType;
 import com.garmentqc.system.exception.BadRequestException;
 import com.garmentqc.system.exception.ResourceNotFoundException;
 import com.garmentqc.system.exception.UnauthorizedException;
+import com.garmentqc.system.model.Attendance;
 import com.garmentqc.system.model.DefectArea;
 import com.garmentqc.system.model.DefectType;
 import com.garmentqc.system.model.Inspection;
 import com.garmentqc.system.model.InspectionDefect;
 import com.garmentqc.system.model.Line;
 import com.garmentqc.system.model.User;
+import com.garmentqc.system.repository.AttendanceRepository;
 import com.garmentqc.system.repository.DefectAreaRepository;
 import com.garmentqc.system.repository.DefectTypeRepository;
 import com.garmentqc.system.repository.InspectionRepository;
@@ -38,12 +55,17 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class InspectionService {
-
         private static final Set<String> SUPPORTED_SECTIONS = Set.of("SEWING", "FINISHING", "WASHING", "PACKING");
 
         private static final String SUPER_ADMIN = "SUPER_ADMIN";
         private static final String ADMIN = "ADMIN";
         private static final String USER = "USER";
+
+        private static final ZoneId ZONE = ZoneId.of("Asia/Jakarta");
+
+        private static final DateTimeFormatter SLOT_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+
+        private static final int GRACE_PERIOD_MINUTES = 30;
 
         private final InspectionRepository inspectionRepository;
         private final LineRepository lineRepository;
@@ -51,12 +73,15 @@ public class InspectionService {
         private final UserRepository userRepository;
         private final DefectAreaRepository defectAreaRepository;
         private final UserLineRepository userLineRepository;
+        private final AttendanceRepository attendanceRepository;
 
         @Transactional
         public InspectionResponse create(InspectionRequest request) {
                 validateRequest(request);
 
                 User submittedBy = getCurrentUser();
+
+                validateQcAttendance(submittedBy);
 
                 Line line = findLine(request.getLineId());
 
@@ -84,6 +109,8 @@ public class InspectionService {
                                 process,
                                 washingType,
                                 inspectionTimeSlot);
+
+                validateInspectionTimeSlot(section, inspectionTimeSlot);
 
                 int inspectedQuantity = validateInspectedQuantity(request.getInspectedQuantity());
 
@@ -119,6 +146,84 @@ public class InspectionService {
                 return toResponse(saved);
         }
 
+        private void validateQcAttendance(User user) {
+                if (!USER.equals(user.getRole().name())) {
+                        return;
+                }
+
+                LocalDate today = LocalDate.now(ZONE);
+
+                Attendance attendance = attendanceRepository
+                                .findByUser_IdAndAttendanceDate(user.getId(), today)
+                                .orElseThrow(() -> new BadRequestException("Anda belum melakukan check-in hari ini. "
+                                                + "Silakan check-in terlebih dahulu sebelum membuat inspeksi."));
+
+                if (attendance.getCheckInAt() == null) {
+                        throw new BadRequestException(
+                                        "Anda belum melakukan check-in. " + "Silakan check-in terlebih dahulu.");
+                }
+
+                if (attendance.getCheckOutAt() != null) {
+                        throw new BadRequestException(
+                                        "Anda sudah melakukan check-out. " + "Tidak dapat menambahkan inspeksi baru.");
+                }
+        }
+
+        private void validateInspectionTimeSlot(String section, String timeSlot) {
+                if (!"SEWING".equals(section) && !"WASHING".equals(section)) {
+                        return;
+                }
+
+                if (timeSlot == null || timeSlot.isBlank()) {
+                        throw new BadRequestException("Inspection time slot wajib diisi.");
+                }
+
+                try {
+                        String[] parts = timeSlot.split("-");
+
+                        if (parts.length != 2) {
+                                throw new BadRequestException("Format inspection time slot harus HH:mm-HH:mm.");
+                        }
+
+                        LocalTime start = LocalTime.parse(
+                                        parts[0].trim(),
+                                        SLOT_FORMAT);
+
+                        LocalTime end = LocalTime.parse(
+                                        parts[1].trim(),
+                                        SLOT_FORMAT);
+
+                        if (!end.equals(start.plusHours(1))) {
+                                throw new BadRequestException("Durasi inspection time slot harus satu jam.");
+                        }
+
+                        LocalDateTime now = LocalDateTime.now(ZONE);
+                        LocalDate today = LocalDate.now(ZONE);
+                        LocalDateTime slotStart = LocalDateTime.of(today, start);
+                        LocalDateTime slotEnd = LocalDateTime.of(today, end);
+
+                        if (!slotEnd.isAfter(slotStart)) {
+                                slotEnd = slotEnd.plusDays(1);
+                        }
+
+                        LocalDateTime allowedUntil = slotEnd.plusMinutes(GRACE_PERIOD_MINUTES);
+
+                        if (now.isBefore(slotEnd)) {
+                                throw new BadRequestException("Slot inspeksi belum selesai. "
+                                                + "Inspeksi hanya dapat diinput setelah slot berakhir.");
+                        }
+
+                        if (now.isAfter(allowedUntil)) {
+                                throw new BadRequestException("Waktu input inspeksi untuk slot " + timeSlot
+                                                + " sudah melewati batas toleransi 30 menit.");
+                        }
+
+                } catch (DateTimeParseException e) {
+                        throw new BadRequestException(
+                                        "Format inspection time slot tidak valid. " + "Gunakan format HH:mm-HH:mm.");
+                }
+        }
+
         @Transactional(readOnly = true)
         public InspectionResponse getById(String id) {
                 Inspection inspection = findInspection(id);
@@ -138,30 +243,145 @@ public class InspectionService {
                 String role = currentUser.getRole().name();
 
                 if (SUPER_ADMIN.equals(role) && selectedSection == null) {
-                        throw new BadRequestException("Super Admin wajib memilih section: " + String.join(", ", SUPPORTED_SECTIONS));
+                        throw new BadRequestException(
+                                        "Super Admin wajib memilih section: " + String.join(", ", SUPPORTED_SECTIONS));
                 }
 
                 if (selectedSection != null && !SUPPORTED_SECTIONS.contains(selectedSection)) {
-                        throw new BadRequestException("Section tidak valid. Pilihan: " + String.join(", ", SUPPORTED_SECTIONS));
+                        throw new BadRequestException(
+                                        "Section tidak valid. Pilihan: " + String.join(", ", SUPPORTED_SECTIONS));
                 }
 
                 return inspectionRepository.findAll()
                                 .stream()
                                 .filter(inspection -> canAccessInspection(currentUser, inspection))
                                 .filter(inspection -> {
+
                                         if (selectedSection == null) {
                                                 return true;
                                         }
 
-                                        return inspection.getLine() != null
-                                                        && inspection.getLine().getSection() != null
-                                                        && selectedSection.equals(
-                                                                        inspection.getLine()
-                                                                                        .getSection()
-                                                                                        .name());
+                                        return inspection.getLine() != null && inspection.getLine().getSection() != null
+                                                        && selectedSection.equals(inspection.getLine()
+                                                                        .getSection()
+                                                                        .name());
                                 })
                                 .map(this::toResponse)
                                 .toList();
+        }
+
+        @Transactional(readOnly = true)
+        public Page<InspectionResponse> getAllPaginated(
+                        String section,
+                        Pageable pageable) {
+
+                User currentUser = getCurrentUser();
+
+                String role = currentUser.getRole().name();
+                String selectedSection = normalizeOptional(section);
+
+                if (selectedSection != null
+                                && !SUPPORTED_SECTIONS.contains(selectedSection)) {
+
+                        throw new BadRequestException(
+                                        "Section tidak valid. Pilihan: "
+                                                        + String.join(", ", SUPPORTED_SECTIONS));
+                }
+
+                Sort sort = pageable.getSort().isSorted()
+                                ? pageable.getSort()
+                                : Sort.by(Sort.Direction.DESC, Inspection::getCreatedAt);
+
+                Pageable safePageable = PageRequest.of(
+                                Math.max(pageable.getPageNumber(), 0),
+                                Math.min(Math.max(pageable.getPageSize(), 1), 100),
+                                sort);
+
+                Page<String> idPage;
+
+                if (SUPER_ADMIN.equals(role)) {
+
+                        if (selectedSection == null) {
+                                throw new BadRequestException(
+                                                "Super Admin wajib memilih section: "
+                                                                + String.join(", ", SUPPORTED_SECTIONS));
+                        }
+
+                        Section selected = Section.valueOf(selectedSection);
+
+                        idPage = inspectionRepository.findIdsByLine_Section(
+                                        selected,
+                                        safePageable);
+
+                } else if (ADMIN.equals(role)) {
+
+                        if (currentUser.getSection() == null) {
+                                throw new BadRequestException(
+                                                "Admin belum memiliki section");
+                        }
+
+                        Section adminSection = currentUser.getSection();
+
+                        if (selectedSection != null
+                                        && !adminSection.name().equals(selectedSection)) {
+
+                                return Page.empty(safePageable);
+                        }
+
+                        idPage = inspectionRepository.findIdsByLine_Section(
+                                        adminSection,
+                                        safePageable);
+
+                } else if (USER.equals(role)) {
+
+                        if (selectedSection == null) {
+
+                                idPage = inspectionRepository.findIdsBySubmittedBy_Id(
+                                                currentUser.getId(),
+                                                safePageable);
+
+                        } else {
+
+                                Section selected = Section.valueOf(selectedSection);
+
+                                idPage = inspectionRepository.findIdsBySubmittedBy_IdAndLine_Section(
+                                                currentUser.getId(),
+                                                selected,
+                                                safePageable);
+                        }
+
+                } else {
+                        throw new UnauthorizedException(
+                                        "Role tidak memiliki izin untuk melihat inspection");
+                }
+
+                if (idPage.isEmpty()) {
+                        return new PageImpl<>(
+                                        List.of(),
+                                        safePageable,
+                                        idPage.getTotalElements());
+                }
+
+                List<Inspection> inspections = inspectionRepository
+                                .findAllWithDetailsByIdIn(idPage.getContent());
+
+                Map<String, Inspection> inspectionMap = new HashMap<>();
+
+                for (Inspection inspection : inspections) {
+                        inspectionMap.put(inspection.getId(), inspection);
+                }
+
+                List<InspectionResponse> responses = idPage.getContent()
+                                .stream()
+                                .map(inspectionMap::get)
+                                .filter(java.util.Objects::nonNull)
+                                .map(this::toResponse)
+                                .toList();
+
+                return new PageImpl<>(
+                                responses,
+                                safePageable,
+                                idPage.getTotalElements());
         }
 
         @Transactional
@@ -274,13 +494,13 @@ public class InspectionService {
                                         || line.getSection() == null
                                         || !user.getSection().equals(line.getSection())) {
 
-                                throw new AccessDeniedException( "Admin hanya dapat menggunakan line dari section miliknya");
+                                throw new AccessDeniedException(
+                                                "Admin hanya dapat menggunakan line dari section miliknya");
                         }
                         return;
                 }
 
                 if (USER.equals(role)) {
-
                         return;
                 }
 
@@ -311,13 +531,11 @@ public class InspectionService {
                 }
 
                 if (ADMIN.equals(role)) {
-                        return user.getSection() != null
-                                        && user.getSection().equals(line.getSection());
+                        return user.getSection() != null && user.getSection().equals(line.getSection());
                 }
 
                 if (USER.equals(role)) {
                         User submittedBy = inspection.getSubmittedBy();
-
                         return submittedBy != null
                                         && submittedBy.getId() != null
                                         && submittedBy.getId().equals(user.getId());
@@ -361,8 +579,7 @@ public class InspectionService {
                 }
 
                 if (qtyCheckCartonToday == null) {
-                        throw new BadRequestException(
-                                        "Field 'qtyCheckCartonToday' wajib diisi " + "untuk section PACKING");
+                        throw new BadRequestException("Field 'qtyCheckCartonToday' wajib diisi untuk section PACKING");
                 }
 
                 if (qtyCheckCartonToday < 0) {
@@ -412,15 +629,18 @@ public class InspectionService {
                 if (quantity < 1) {
                         throw new BadRequestException("Field 'inspectedQuantity' minimal 1");
                 }
+
                 return quantity;
         }
 
         private int validateTransferQuantity(Integer transferQuantity, int inspectedQuantity, String section) {
                 if (transferQuantity == null) {
+
                         if ("SEWING".equals(section)) {
                                 throw new BadRequestException(
-                                                "Field 'transferQuantity' wajib diisi " + "untuk section SEWING");
+                                                "Field 'transferQuantity' wajib diisi untuk section SEWING");
                         }
+
                         return 0;
                 }
 
@@ -430,70 +650,65 @@ public class InspectionService {
 
                 if (transferQuantity > inspectedQuantity) {
                         throw new BadRequestException(
-                                        "Field 'transferQuantity' tidak boleh melebihi " + "inspectedQuantity");
+                                        "Field 'transferQuantity' tidak boleh melebihi inspectedQuantity");
                 }
+
                 return transferQuantity;
         }
 
-        private void validateSectionFields(String section, String handfeel, String grade, String process,
-                        WashingType washingType, String inspectionTimeSlot) {
+        private void validateSectionFields(
+                        String section,
+                        String handfeel,
+                        String grade,
+                        String process,
+                        WashingType washingType,
+                        String inspectionTimeSlot) {
+
                 switch (section) {
                         case "SEWING":
                                 if (handfeel != null || grade != null || process != null || washingType != null) {
-                                        throw new BadRequestException(
-                                                        "Section SEWING tidak menggunakan "
-                                                                        + "handfeel, grade, process, "
-                                                                        + "atau washingType");
+                                        throw new BadRequestException("Section SEWING tidak menggunakan "
+                                                        + "handfeel, grade, process, atau washingType");
                                 }
 
                                 if (inspectionTimeSlot == null) {
                                         throw new BadRequestException(
-                                                        "Field 'inspectionTimeSlot' wajib diisi "
-                                                                        + "untuk section SEWING");
+                                                        "Field 'inspectionTimeSlot' wajib diisi untuk section SEWING");
                                 }
+
                                 break;
 
                         case "WASHING":
                                 if (handfeel == null) {
                                         throw new BadRequestException(
-                                                        "Field 'handfeel' wajib diisi "
-                                                                        + "untuk section WASHING");
+                                                        "Field 'handfeel' wajib diisi untuk section WASHING");
                                 }
 
                                 if (grade == null) {
                                         throw new BadRequestException(
-                                                        "Field 'grade' wajib diisi "
-                                                                        + "untuk section WASHING");
+                                                        "Field 'grade' wajib diisi untuk section WASHING");
                                 }
 
                                 if (washingType == null) {
                                         throw new BadRequestException(
-                                                        "Field 'washingType' wajib diisi "
-                                                                        + "untuk section WASHING. "
-                                                                        + "Pilihan: BULK atau REPAIR");
+                                                        "Field 'washingType' wajib diisi untuk section WASHING. Pilihan: BULK atau REPAIR");
                                 }
 
                                 if (inspectionTimeSlot == null) {
                                         throw new BadRequestException(
-                                                        "Field 'inspectionTimeSlot' wajib diisi "
-                                                                        + "untuk section WASHING");
+                                                        "Field 'inspectionTimeSlot' wajib diisi untuk section WASHING");
                                 }
 
                                 if (process != null) {
-                                        throw new BadRequestException(
-                                                        "Section WASHING tidak menggunakan process");
+                                        throw new BadRequestException("Section WASHING tidak menggunakan process");
                                 }
 
                                 break;
 
                         case "FINISHING":
-                                if (handfeel != null
-                                                || grade != null
-                                                || washingType != null) {
-
+                                if (handfeel != null || grade != null || washingType != null) {
                                         throw new BadRequestException(
-                                                        "Section FINISHING tidak menggunakan "
-                                                                        + "handfeel, grade, atau washingType");
+                                                        "Section FINISHING tidak menggunakan handfeel, grade, atau washingType");
                                 }
 
                                 if (process != null
@@ -501,24 +716,22 @@ public class InspectionService {
                                                 && !process.equals("NON_WASH")) {
 
                                         throw new BadRequestException(
-                                                        "Field 'process' untuk FINISHING "
-                                                                        + "hanya boleh WASH atau NON_WASH");
+                                                        "Field 'process' untuk FINISHING hanya boleh WASH atau NON_WASH");
                                 }
 
                                 break;
 
                         case "PACKING":
                                 if (handfeel != null || grade != null || process != null || washingType != null) {
-                                        throw new BadRequestException(
-                                                        "Section PACKING tidak menggunakan "
-                                                                        + "handfeel, grade, process, "
-                                                                        + "atau washingType");
+                                        throw new BadRequestException("Section PACKING tidak menggunakan "
+                                                        + "handfeel, grade, process, atau washingType");
                                 }
 
                                 if (inspectionTimeSlot != null) {
                                         throw new BadRequestException(
-                                                        "Section PACKING tidak menggunakan " + "inspectionTimeSlot");
+                                                        "Section PACKING tidak menggunakan inspectionTimeSlot");
                                 }
+
                                 break;
 
                         default:
@@ -526,9 +739,19 @@ public class InspectionService {
                 }
         }
 
-        private void applyRequestFields(Inspection inspection, InspectionRequest request, Line line,
-                        int inspectedQuantity, int transferQuantity, Integer qtyCheckCartonToday, String section,
-                        String handfeel, String grade, String process, WashingType washingType) {
+        private void applyRequestFields(
+                        Inspection inspection,
+                        InspectionRequest request,
+                        Line line,
+                        int inspectedQuantity,
+                        int transferQuantity,
+                        Integer qtyCheckCartonToday,
+                        String section,
+                        String handfeel,
+                        String grade,
+                        String process,
+                        WashingType washingType) {
+
                 inspection.setBuyerName(request.getBuyerName().trim());
                 inspection.setStyleCode(request.getStyleCode().trim());
                 inspection.setColorName(request.getColorName().trim());
@@ -563,8 +786,11 @@ public class InspectionService {
                                                 : null);
         }
 
-        private void replaceDefects(Inspection inspection, List<InspectionDefectRequest> defects,
+        private void replaceDefects(
+                        Inspection inspection,
+                        List<InspectionDefectRequest> defects,
                         int inspectedQuantity) {
+
                 inspection.getInspectionDefects().clear();
 
                 if (defects == null || defects.isEmpty()) {
@@ -572,7 +798,9 @@ public class InspectionService {
                 }
 
                 int totalDefect = 0;
+
                 for (int i = 0; i < defects.size(); i++) {
+
                         InspectionDefectRequest item = defects.get(i);
 
                         if (item == null) {
@@ -583,13 +811,13 @@ public class InspectionService {
 
                         if (defectTypeId == null || defectTypeId.isBlank()) {
                                 throw new BadRequestException(
-                                                "Field 'defectTypeId' wajib diisi " + "pada defects indeks " + i);
+                                                "Field 'defectTypeId' wajib diisi pada defects indeks " + i);
                         }
 
                         Integer quantity = item.getQuantity();
+
                         if (quantity == null) {
-                                throw new BadRequestException(
-                                                "Field 'quantity' wajib diisi " + "pada defects indeks " + i);
+                                throw new BadRequestException("Field 'quantity' wajib diisi pada defects indeks " + i);
                         }
 
                         if (quantity < 1) {
@@ -598,9 +826,10 @@ public class InspectionService {
 
                         DefectType defectType = defectTypeRepository
                                         .findById(defectTypeId.trim())
-                                        .orElseThrow(() -> new ResourceNotFoundException("Defect type dengan ID "
-                                                        + defectTypeId
-                                                        + " tidak ditemukan"));
+                                        .orElseThrow(() -> new ResourceNotFoundException(
+                                                        "Defect type dengan ID "
+                                                                        + defectTypeId
+                                                                        + " tidak ditemukan"));
 
                         if (!defectType.isActive()) {
                                 throw new BadRequestException(
@@ -613,7 +842,7 @@ public class InspectionService {
                                 totalDefect = Math.addExact(totalDefect, quantity);
                         } catch (ArithmeticException ex) {
                                 throw new BadRequestException(
-                                                "Total quantity defect melebihi " + "batas angka yang diperbolehkan");
+                                                "Total quantity defect melebihi batas angka yang diperbolehkan");
                         }
 
                         InspectionDefect defect = new InspectionDefect();
@@ -644,13 +873,10 @@ public class InspectionService {
         @Transactional(readOnly = true)
         public List<DefectArea> searchDefectAreas(String keyword) {
                 if (keyword == null || keyword.isBlank()) {
-                        return defectAreaRepository
-                                        .findByActiveTrueOrderByNameAsc();
+                        return defectAreaRepository.findByActiveTrueOrderByNameAsc();
                 }
 
-                return defectAreaRepository
-                                .findByNameContainingIgnoreCaseAndActiveTrueOrderByNameAsc(
-                                                keyword.trim());
+                return defectAreaRepository.findByNameContainingIgnoreCaseAndActiveTrueOrderByNameAsc(keyword.trim());
         }
 
         @Transactional(readOnly = true)
@@ -671,8 +897,7 @@ public class InspectionService {
                 }
 
                 if (keyword == null || keyword.isBlank()) {
-                        return defectTypeRepository
-                                        .findByDefectAreaAndActiveTrueOrderByNameAsc(area);
+                        return defectTypeRepository.findByDefectAreaAndActiveTrueOrderByNameAsc(area);
                 }
 
                 return defectTypeRepository
@@ -682,7 +907,10 @@ public class InspectionService {
         }
 
         @Transactional(readOnly = true)
-        public List<DefectSearchResponse> searchDefects(String defectAreaId, String keyword) {
+        public List<DefectSearchResponse> searchDefects(
+                        String defectAreaId,
+                        String keyword) {
+
                 String areaId = (defectAreaId == null || defectAreaId.isBlank())
                                 ? null
                                 : defectAreaId.trim();
@@ -694,6 +922,7 @@ public class InspectionService {
                 List<DefectType> types;
 
                 if (areaId != null) {
+
                         DefectArea area = defectAreaRepository
                                         .findById(areaId)
                                         .orElseThrow(() -> new ResourceNotFoundException(
@@ -708,6 +937,7 @@ public class InspectionService {
                                         : defectTypeRepository
                                                         .findByDefectArea_IdAndNameContainingIgnoreCaseAndActiveTrue(
                                                                         areaId, key);
+
                 } else {
                         types = key == null
                                         ? defectTypeRepository.findByActiveTrue()
@@ -715,19 +945,24 @@ public class InspectionService {
                 }
 
                 return types.stream()
-                                .filter(t -> t.getDefectArea() == null || t.getDefectArea().isActive())
+                                .filter(t -> t.getDefectArea() == null
+                                                || t.getDefectArea().isActive())
                                 .sorted(Comparator
-                                                .comparing((DefectType t) -> t.getDefectArea() == null
-                                                                ? ""
-                                                                : t.getDefectArea().getName(),
+                                                .comparing(
+                                                                (DefectType t) -> t.getDefectArea() == null
+                                                                                ? ""
+                                                                                : t.getDefectArea().getName(),
                                                                 String.CASE_INSENSITIVE_ORDER)
-                                                .thenComparing(DefectType::getName,
+                                                .thenComparing(
+                                                                DefectType::getName,
                                                                 String.CASE_INSENSITIVE_ORDER))
                                 .map(DefectSearchResponse::from)
                                 .toList();
         }
 
-        private double calculatePercentage(int totalDefect, int inspectQuantity) {
+        private double calculatePercentage(
+                        int totalDefect,
+                        int inspectQuantity) {
                 if (inspectQuantity <= 0) {
                         return 0.0;
                 }
@@ -756,9 +991,7 @@ public class InspectionService {
                                 ? 0
                                 : inspection.getInspectQuantity();
 
-                double defectPercentage = calculatePercentage(
-                                totalDefect,
-                                inspectQuantity);
+                double defectPercentage = calculatePercentage(totalDefect, inspectQuantity);
 
                 int goodQc = inspectQuantity - totalDefect;
 
