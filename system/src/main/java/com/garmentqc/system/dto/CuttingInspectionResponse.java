@@ -14,23 +14,14 @@ import lombok.Getter;
 public class CuttingInspectionResponse {
 
     private String id;
-
     private CuttingProcessCheck processCheck;
-
     private String lineId;
-
     private String lineName;
-
     private String submittedById;
-
     private String submittedByName;
-
     private String comment;
-
     private List<StyleItemResponse> items;
-
     private Instant createdAt;
-
     private Instant updatedAt;
 
     @Getter
@@ -39,11 +30,13 @@ public class CuttingInspectionResponse {
 
         private String id;
 
+        private String buyerId;
+
         private String buyerName;
 
-        private String styleCode;
+        private String styleId;
 
-        private String colorName;
+        private String styleCode;
 
         private String lot;
 

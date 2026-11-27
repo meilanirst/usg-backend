@@ -21,4 +21,5 @@ public interface StyleRepository extends JpaRepository<Style, String> {
             String styleCode);
 
     boolean existsByStyleCodeIgnoreCase(String styleCode);
+
 }

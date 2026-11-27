@@ -23,8 +23,8 @@ public class CuttingInspectionItem extends BaseEntity {
     private CuttingInspection cuttingInspection;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "style_color_id", nullable = false)
-    private StyleColor styleColor;
+    @JoinColumn(name = "style_id", nullable = false)
+    private Style style;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cutting_defect_type_id")

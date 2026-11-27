@@ -41,7 +41,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CuttingReportExcelService {
 
-        private static final int COLUMN_COUNT = 10;
+        private static final int COLUMN_COUNT = 9;
 
         private static final Color TITLE_PASTEL = new Color(168, 200, 178);
         private static final Color SUBTITLE_PASTEL = new Color(198, 215, 202);
@@ -49,13 +49,13 @@ public class CuttingReportExcelService {
         private static final int PROCESS_COL = 0;
         private static final int BUYER_COL = 1;
         private static final int STYLE_COL = 2;
-        private static final int COLOR_COL = 3;
-        private static final int LOT_COL = 4;
-        private static final int QTY_INSPECT_COL = 5;
-        private static final int QTY_DEFECT_COL = 6;
-        private static final int PERCENTAGE_COL = 7;
-        private static final int OPERATOR_COL = 8;
-        private static final int DETAIL_DEFECT_COL = 9;
+        private static final int LOT_COL = 3;
+        private static final int QTY_INSPECT_COL = 4;
+        private static final int QTY_DEFECT_COL = 5;
+        private static final int PERCENTAGE_COL = 6;
+        private static final int OPERATOR_COL = 7;
+        private static final int DETAIL_DEFECT_COL = 8;
+
         private static final int HEADER_ROW_INDEX = 5;
         private static final int FIRST_DATA_ROW_INDEX = HEADER_ROW_INDEX + 1;
 
@@ -117,7 +117,7 @@ public class CuttingReportExcelService {
                         headerRow.setHeightInPoints(34);
 
                         String[] headers = {
-                                        "PROCESS CHECK", "BUYER", "STYLE", "COLOR", "LOT",
+                                        "PROCESS CHECK", "BUYER", "STYLE", "LOT",
                                         "QTY INSPECT", "QTY DEFECT", "% DEFECT",
                                         "OPERATOR NAME", "DETAIL DEFECT"
                         };
@@ -142,7 +142,6 @@ public class CuttingReportExcelService {
                                         setText(row, PROCESS_COL, processName, textStyle);
                                         setText(row, BUYER_COL, detail.getBuyerName(), textStyle);
                                         setText(row, STYLE_COL, detail.getStyleCode(), textStyle);
-                                        setText(row, COLOR_COL, detail.getColorName(), textStyle);
                                         setText(row, LOT_COL, detail.getLot(), textStyle);
 
                                         setNumber(row, QTY_INSPECT_COL, detail.getQuantityInspect(), numberStyle);
@@ -203,7 +202,7 @@ public class CuttingReportExcelService {
                         }
 
                         int[] widths = {
-                                        24, 18, 20, 16, 16, 15, 13, 12, 20, 24
+                                        24, 18, 20, 16, 15, 13, 12, 20, 24
                         };
 
                         for (int i = 0; i < widths.length; i++) {

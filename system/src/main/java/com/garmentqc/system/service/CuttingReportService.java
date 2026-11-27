@@ -26,7 +26,6 @@ import com.garmentqc.system.model.Buyer;
 import com.garmentqc.system.model.CuttingInspection;
 import com.garmentqc.system.model.CuttingInspectionItem;
 import com.garmentqc.system.model.Style;
-import com.garmentqc.system.model.StyleColor;
 import com.garmentqc.system.model.User;
 import com.garmentqc.system.repository.CuttingInspectionItemRepository;
 import com.garmentqc.system.repository.CuttingInspectionRepository;
@@ -182,11 +181,7 @@ public class CuttingReportService {
                                                 ? 0L
                                                 : item.getQuantityDefect();
 
-                                StyleColor styleColor = item.getStyleColor();
-
-                                Style style = styleColor != null
-                                                ? styleColor.getStyle()
-                                                : null;
+                                Style style = item.getStyle();
 
                                 Buyer buyer = style != null
                                                 ? style.getBuyer()
@@ -198,10 +193,6 @@ public class CuttingReportService {
 
                                 String styleCode = style != null
                                                 ? style.getStyleCode()
-                                                : "";
-
-                                String colorName = styleColor != null
-                                                ? styleColor.getColorName()
                                                 : "";
 
                                 String defectTypeName = item.getDefectType() != null
@@ -219,7 +210,6 @@ public class CuttingReportService {
                                 CuttingReportResponse.DetailRow detailRow = new CuttingReportResponse.DetailRow(
                                                 buyerName,
                                                 styleCode,
-                                                colorName,
                                                 item.getLot(),
                                                 defectTypeName,
                                                 quantityInspect,
@@ -227,7 +217,6 @@ public class CuttingReportService {
                                                 itemPercentage,
                                                 item.getOperatorName(),
                                                 inspectionDate);
-
                                 summary.detailRows.add(detailRow);
 
                                 totalItems++;
@@ -302,12 +291,7 @@ public class CuttingReportService {
                                         List.of());
 
                         for (CuttingInspectionItem item : items) {
-
-                                StyleColor styleColor = item.getStyleColor();
-
-                                Style style = styleColor != null
-                                                ? styleColor.getStyle()
-                                                : null;
+                                Style style = item.getStyle();
 
                                 Buyer buyer = style != null
                                                 ? style.getBuyer()

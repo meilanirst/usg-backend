@@ -29,14 +29,14 @@ import com.garmentqc.system.model.CuttingInspection;
 import com.garmentqc.system.model.CuttingInspectionItem;
 import com.garmentqc.system.model.Line;
 import com.garmentqc.system.model.Style;
-import com.garmentqc.system.model.StyleColor;
 import com.garmentqc.system.model.User;
 import com.garmentqc.system.repository.AttendanceRepository;
+import com.garmentqc.system.repository.BuyerRepository;
 import com.garmentqc.system.repository.CuttingDefectTypeRepository;
 import com.garmentqc.system.repository.CuttingInspectionItemRepository;
 import com.garmentqc.system.repository.CuttingInspectionRepository;
 import com.garmentqc.system.repository.LineRepository;
-import com.garmentqc.system.repository.StyleColorRepository;
+import com.garmentqc.system.repository.StyleRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -51,7 +51,8 @@ public class CuttingInspectionService {
         private final CuttingDefectTypeRepository defectTypeRepository;
         private final LineRepository lineRepository;
         private final AttendanceRepository attendanceRepository;
-        private final StyleColorRepository styleColorRepository;
+        private final BuyerRepository buyerRepository;
+        private final StyleRepository styleRepository;
 
         @Transactional
         public CuttingInspectionResponse create(
@@ -83,6 +84,7 @@ public class CuttingInspectionService {
                 validateCuttingSection(currentUser);
 
                 if ("USER".equals(currentUser.getRole().name())) {
+
                         return inspectionRepository
                                         .findBySubmittedById(currentUser.getId())
                                         .stream()
@@ -106,11 +108,14 @@ public class CuttingInspectionService {
                 Page<CuttingInspection> inspections;
 
                 if ("USER".equals(currentUser.getRole().name())) {
+
                         inspections = inspectionRepository
                                         .findBySubmittedByIdOrderByCreatedAtDescIdDesc(
                                                         currentUser.getId(),
                                                         pageable);
+
                 } else {
+
                         inspections = inspectionRepository
                                         .findAllByOrderByCreatedAtDescIdDesc(pageable);
                 }
@@ -185,7 +190,9 @@ public class CuttingInspectionService {
         }
 
         @Transactional
-        public void delete(String id, User currentUser) {
+        public void delete(
+                        String id,
+                        User currentUser) {
 
                 if (id == null || id.isBlank()) {
                         throw new BadRequestException("ID laporan wajib diisi");
@@ -236,6 +243,7 @@ public class CuttingInspectionService {
                 }
 
                 if (search == null || search.isBlank()) {
+
                         return defectTypeRepository
                                         .findByProcessCheckAndActiveTrue(processCheck);
                 }
@@ -252,12 +260,9 @@ public class CuttingInspectionService {
 
                 for (CuttingInspectionRequest.StyleItemRequest itemRequest : request.getItems()) {
 
-                        StyleColor styleColor = styleColorRepository.findById(
-                                        itemRequest.getStyleColorId())
-                                        .orElseThrow(() -> new ResourceNotFoundException(
-                                                        "Color tidak ditemukan"));
-
-                        validateStyleColor(styleColor);
+                        Style style = getOrCreateStyle(
+                                        itemRequest.getBuyerId(),
+                                        itemRequest.getStyleCode());
 
                         String lot = requireText(
                                         itemRequest.getLot(),
@@ -293,7 +298,7 @@ public class CuttingInspectionService {
                         CuttingInspectionItem item = new CuttingInspectionItem();
 
                         item.setCuttingInspection(inspection);
-                        item.setStyleColor(styleColor);
+                        item.setStyle(style);
                         item.setLot(lot);
                         item.setOperatorName(operatorName);
                         item.setDefectType(defectType);
@@ -302,6 +307,37 @@ public class CuttingInspectionService {
 
                         itemRepository.save(item);
                 }
+        }
+
+        private Style getOrCreateStyle(
+                        String buyerId,
+                        String styleCode) {
+
+                String validBuyerId = requireText(
+                                buyerId,
+                                "Buyer wajib dipilih");
+
+                String normalizedStyleCode = requireText(
+                                styleCode,
+                                "Style code wajib diisi");
+
+                Buyer buyer = buyerRepository.findById(validBuyerId)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Buyer tidak ditemukan"));
+
+                return styleRepository
+                                .findByBuyer_IdAndStyleCodeIgnoreCase(
+                                                buyer.getId(),
+                                                normalizedStyleCode)
+                                .orElseGet(() -> {
+
+                                        Style style = new Style();
+
+                                        style.setBuyer(buyer);
+                                        style.setStyleCode(normalizedStyleCode);
+
+                                        return styleRepository.save(style);
+                                });
         }
 
         private void validateItems(CuttingInspectionRequest request) {
@@ -331,12 +367,17 @@ public class CuttingInspectionService {
                 for (CuttingInspectionRequest.StyleItemRequest item : request.getItems()) {
 
                         if (item == null) {
-                                throw new BadRequestException("Item style tidak boleh kosong");
+                                throw new BadRequestException(
+                                                "Item style tidak boleh kosong");
                         }
 
-                        String styleColorId = requireText(
-                                        item.getStyleColorId(),
-                                        "Color wajib dipilih");
+                        String buyerId = requireText(
+                                        item.getBuyerId(),
+                                        "Buyer wajib dipilih");
+
+                        String styleCode = requireText(
+                                        item.getStyleCode(),
+                                        "Style code wajib diisi");
 
                         String lot = requireText(
                                         item.getLot(),
@@ -346,12 +387,13 @@ public class CuttingInspectionService {
                                         item.getOperatorName(),
                                         "Nama operator wajib diisi");
 
-                        String itemKey = styleColorId + "|"
+                        String itemKey = buyerId + "|"
+                                        + styleCode.toLowerCase(Locale.ROOT) + "|"
                                         + lot.toLowerCase(Locale.ROOT);
 
                         if (!usedItems.add(itemKey)) {
                                 throw new BadRequestException(
-                                                "Kombinasi style, color, dan lot "
+                                                "Kombinasi buyer, style, dan lot "
                                                                 + "yang sama tidak boleh ditambahkan dua kali");
                         }
 
@@ -385,16 +427,6 @@ public class CuttingInspectionService {
                 }
         }
 
-        private void validateStyleColor(StyleColor styleColor) {
-
-                if (styleColor.getStyle() == null
-                                || styleColor.getStyle().getBuyer() == null) {
-
-                        throw new BadRequestException(
-                                        "Data master color, style, atau buyer tidak valid");
-                }
-        }
-
         private void validateDefectType(
                         CuttingDefectType defectType,
                         CuttingProcessCheck processCheck) {
@@ -414,12 +446,14 @@ public class CuttingInspectionService {
         }
 
         private void deleteItems(CuttingInspection inspection) {
+
                 List<CuttingInspectionItem> items = itemRepository.findByCuttingInspection(inspection);
 
                 itemRepository.deleteAll(items);
         }
 
         private void validateAttendance(User user) {
+
                 LocalDate today = LocalDate.now(ZONE);
 
                 Attendance attendance = attendanceRepository
@@ -430,7 +464,8 @@ public class CuttingInspectionService {
                                                 "Anda harus melakukan check-in sebelum membuat inspeksi"));
 
                 if (attendance.getCheckInAt() == null) {
-                        throw new BadRequestException("Anda harus melakukan check-in sebelum membuat inspeksi");
+                        throw new BadRequestException(
+                                        "Anda harus melakukan check-in sebelum membuat inspeksi");
                 }
 
                 if (attendance.getCheckOutAt() != null) {
@@ -439,13 +474,18 @@ public class CuttingInspectionService {
                 }
         }
 
-        private CuttingInspectionResponse toResponse(CuttingInspection inspection) {
+        private CuttingInspectionResponse toResponse(
+                        CuttingInspection inspection) {
+
                 List<CuttingInspectionItem> items = itemRepository.findByCuttingInspection(inspection);
 
                 return toResponse(inspection, items);
         }
 
-        private CuttingInspectionResponse toResponse(CuttingInspection inspection, List<CuttingInspectionItem> items) {
+        private CuttingInspectionResponse toResponse(
+                        CuttingInspection inspection,
+                        List<CuttingInspectionItem> items) {
+
                 Line line = inspection.getLine();
                 User submittedBy = inspection.getSubmittedBy();
 
@@ -463,26 +503,26 @@ public class CuttingInspectionService {
                                         ? defectType.getName()
                                         : null;
 
-                        StyleColor styleColor = item.getStyleColor();
-
-                        Style style = styleColor != null
-                                        ? styleColor.getStyle()
-                                        : null;
+                        Style style = item.getStyle();
 
                         Buyer buyer = style != null
                                         ? style.getBuyer()
+                                        : null;
+
+                        String buyerId = buyer != null
+                                        ? buyer.getId()
                                         : null;
 
                         String buyerName = buyer != null
                                         ? buyer.getName()
                                         : null;
 
-                        String styleCode = style != null
-                                        ? style.getStyleCode()
+                        String styleId = style != null
+                                        ? style.getId()
                                         : null;
 
-                        String colorName = styleColor != null
-                                        ? styleColor.getColorName()
+                        String styleCode = style != null
+                                        ? style.getStyleCode()
                                         : null;
 
                         int quantityInspect = item.getQuantityInspect() == null
@@ -500,9 +540,10 @@ public class CuttingInspectionService {
                         itemResponses.add(
                                         new CuttingInspectionResponse.StyleItemResponse(
                                                         item.getId(),
+                                                        buyerId,
                                                         buyerName,
+                                                        styleId,
                                                         styleCode,
-                                                        colorName,
                                                         item.getLot(),
                                                         item.getOperatorName(),
                                                         quantityInspect,
@@ -525,7 +566,9 @@ public class CuttingInspectionService {
                                 inspection.getUpdatedAt());
         }
 
-        private double calculatePercentage(int totalDefect, int quantityInspect) {
+        private double calculatePercentage(
+                        int totalDefect,
+                        int quantityInspect) {
 
                 if (quantityInspect <= 0) {
                         return 0.0;
@@ -540,8 +583,11 @@ public class CuttingInspectionService {
 
                 Line line = getActiveLine(lineId);
 
-                if (line.getSection() == null || !"CUTTING".equals(line.getSection().name())) {
-                        throw new BadRequestException("Laporan cutting hanya boleh menggunakan line CUTTING");
+                if (line.getSection() == null
+                                || !"CUTTING".equals(line.getSection().name())) {
+
+                        throw new BadRequestException(
+                                        "Laporan cutting hanya boleh menggunakan line CUTTING");
                 }
 
                 return line;
@@ -550,14 +596,17 @@ public class CuttingInspectionService {
         private Line getActiveLine(String lineId) {
 
                 if (lineId == null || lineId.isBlank()) {
-                        throw new BadRequestException("Line harus dipilih");
+                        throw new BadRequestException(
+                                        "Line harus dipilih");
                 }
 
                 Line line = lineRepository.findById(lineId)
-                                .orElseThrow(() -> new ResourceNotFoundException("Line tidak ditemukan"));
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "Line tidak ditemukan"));
 
                 if (!line.isActive()) {
-                        throw new BadRequestException("Line tidak aktif");
+                        throw new BadRequestException(
+                                        "Line tidak aktif");
                 }
 
                 return line;
@@ -571,17 +620,22 @@ public class CuttingInspectionService {
 
                 String role = user.getRole().name();
 
-                if ("SUPER_ADMIN".equals(role) || "VISITOR".equals(role)) {
+                if ("SUPER_ADMIN".equals(role)
+                                || "VISITOR".equals(role)) {
                         return;
                 }
 
-                if (!"USER".equals(role) && !"ADMIN".equals(role)) {
+                if (!"USER".equals(role)
+                                && !"ADMIN".equals(role)) {
+
                         throw new UnauthorizedException("Akses ditolak");
                 }
 
-                if (user.getSection() == null || !"CUTTING".equals(user.getSection().name())) {
+                if (user.getSection() == null
+                                || !"CUTTING".equals(user.getSection().name())) {
 
-                        throw new UnauthorizedException("Akses hanya untuk pengguna section CUTTING");
+                        throw new UnauthorizedException(
+                                        "Akses hanya untuk pengguna section CUTTING");
                 }
         }
 
@@ -590,24 +644,30 @@ public class CuttingInspectionService {
                 validateCuttingSection(user);
 
                 if (!"USER".equals(user.getRole().name())) {
-                        throw new UnauthorizedException("Hanya USER section CUTTING yang boleh membuat laporan");
+                        throw new UnauthorizedException(
+                                        "Hanya USER section CUTTING yang boleh membuat laporan");
                 }
         }
 
-        private void validateCanAccessInspection(CuttingInspection inspection, User currentUser) {
+        private void validateCanAccessInspection(
+                        CuttingInspection inspection,
+                        User currentUser) {
 
                 validateCuttingSection(currentUser);
 
                 String role = currentUser.getRole().name();
 
-                if ("VISITOR".equals(role) || "SUPER_ADMIN".equals(role)) {
+                if ("VISITOR".equals(role)
+                                || "SUPER_ADMIN".equals(role)) {
                         return;
                 }
 
                 if ("USER".equals(role)) {
 
                         User submittedBy = inspection.getSubmittedBy();
-                        if (submittedBy == null || !submittedBy.getId().equals(currentUser.getId())) {
+
+                        if (submittedBy == null
+                                        || !submittedBy.getId().equals(currentUser.getId())) {
 
                                 throw new UnauthorizedException(
                                                 "Anda hanya dapat mengakses laporan yang anda input sendiri");
@@ -615,7 +675,10 @@ public class CuttingInspectionService {
                 }
         }
 
-        private String requireText(String value, String message) {
+        private String requireText(
+                        String value,
+                        String message) {
+
                 if (value == null || value.isBlank()) {
                         throw new BadRequestException(message);
                 }

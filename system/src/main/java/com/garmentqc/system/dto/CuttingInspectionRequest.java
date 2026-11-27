@@ -36,14 +36,22 @@ public class CuttingInspectionRequest {
     @NoArgsConstructor
     public static class StyleItemRequest {
 
-        private String styleColorId;
+        @NotBlank
+        private String buyerId;
 
+        @NotBlank
+        private String styleCode;
+
+        @NotBlank
         private String lot;
 
+        @NotBlank
         private String operatorName;
 
+        @NotNull
         private Integer quantityInspect;
 
+        @NotNull
         private Integer quantityDefect;
 
         private String defectTypeId;

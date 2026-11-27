@@ -58,8 +58,6 @@ public class CuttingReportResponse {
 
         private String styleCode;
 
-        private String colorName;
-
         private String lot;
 
         private String defectTypeName;
